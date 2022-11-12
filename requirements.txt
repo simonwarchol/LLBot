@@ -1,0 +1,5 @@
+urllib3==1.26.11
+pandas==1.5.1
+python-dotenv==0.21.0
+playwright==1.25.2
+lxml==4.9.1
