@@ -35,6 +35,8 @@ player_list_imessage = {
     "Scott": {"id": "74615"},
     "Julia": {"id": "71455"},
     "Enshu": {"id": "82484"},
+    "Evan": {"id": "74465" },
+    "Alex": {"id": "79044"},
 }
 player_list_sms = {
     "Simon": {"id": "55444"},
