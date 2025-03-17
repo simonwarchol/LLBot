@@ -18,7 +18,6 @@ print("config", config)
 openai.api_key = config["OPENAI_API_KEY"]
 
 
-
 player_list_imessage = {
     "Simon": {"id": "55444"},
     "Nick": {"id": "58714"},
@@ -28,13 +27,16 @@ player_list_imessage = {
     "CC": {"id": "64157"},
     "Katie": {"id": "53779"},
     "Cat": {"id": "71256"},
-    "Yasmina": {"id": "72221"},
-    "Kate": {"id": "68591"},
+    # "Yasmina": {"id": "72221"},
+    # "Kate": {"id": "68591"},
     "Luke": {"id": "68635"},
     "Sagar": {"id": "74612"},
     "Scott": {"id": "74615"},
-    "Julia": {"id": "71455"},
     "Enshu": {"id": "82484"},
+    "Evan": {"id": "74465"},
+    "Rohan": {"id": "88991"},
+    "Rebecca": {"id": "86268"},
+    "Taylor": {"id": "96076"},
 }
 player_list_sms = {
     "Simon": {"id": "55444"},
@@ -117,7 +119,9 @@ def get_scores(player_list):
             if question_results is None:
                 question_results = []
                 day_table = page.inner_html("table.QTable")
-                day_table_df = pd.read_html(StringIO("<table>" + day_table + "</table>"))
+                day_table_df = pd.read_html(
+                    StringIO("<table>" + day_table + "</table>")
+                )
                 if day_table_df and len(day_table_df) > 0:
                     day_table_df = day_table_df[0].dropna()
                     for i in range(6):
@@ -146,13 +150,21 @@ def get_scores(player_list):
                 if len(q["smart"]) == 1:
                     who = q["smart"][0]
                     question_text += (
-                        "Only " + who + " got: " + q["question"] + " -- WOW!\n"
+                        "Only " + who + " got: " + q["question"] + " -- WOW!\n\n"
+                    )
+                elif len(q["smart"]) == len(player_list):
+                    question_text += (
+                        "Everyone got: " + q["question"] + " -- IT'S TOO EASYYYYY!\n\n"
                     )
 
                 if len(q["dumb"]) == 1:
                     who = q["dumb"][0]
                     question_text += (
-                        "Only " + who + " missed: " + q["question"] + " -- WOW!\n"
+                        "Only " + who + " missed: " + q["question"] + " -- WOW!\n\n"
+                    )
+                elif len(q["dumb"]) == len(player_list):
+                    question_text += (
+                        "Everyone missed: " + q["question"] + " -- WE R DUM!\n\n"
                     )
 
         users = {item["user"] for item in todays_scores}
@@ -176,7 +188,8 @@ def get_scores(player_list):
                             h2h_users.add(item["user"])
                             h2h_users.add(opponent)
 
-        todays_scores.sort(key=lambda x: x["user"])
+        todays_scores.sort(key=lambda x: x["score"][0],reverse=True)
+
         # # "user": username,
         #                     "score": score,
         #                     "record": record,
@@ -187,7 +200,7 @@ def get_scores(player_list):
             scores_string += (
                 f"{item['user']}: {item['record']} {item['score']} {item['rundle']}\n"
             )
-
+    print(scores_string)
     return scores_string, question_text, head_to_head_string
 
 
@@ -292,17 +305,20 @@ def post_text(text, recipients):
         }
     )
     http = urllib3.PoolManager()
-    r = http.request('POST', 'http://localhost:3005/message',
-                     headers={'Content-Type': 'application/json'},
-                     body=encoded_body)
+    r = http.request(
+        "POST",
+        "http://localhost:3005/message",
+        headers={"Content-Type": "application/json"},
+        body=encoded_body,
+    )
 
     print(r.read())
 
     # Post request with requests python library
 
 
-
-def get_chatgpt_response(scores,qs,h2h):
+def get_chatgpt_response(scores, qs, h2h):
+    
 
     recap_prompt = """
     Please write a single-paragraph news blurb about the following daily results from a trivia league, which is divided into different leagues called "rundles" for the following players. 
@@ -315,7 +331,7 @@ def get_chatgpt_response(scores,qs,h2h):
     In addition, add a paragraph of highlights, which calls out the following head-to-head matchups and any question(s) that a single player got correct or missed. 
     If no information for either is provided, do not include it in the output."""
 
-    prompt = recap_prompt + scores +'\n' + highlights_prompt + '\n' + qs +'\n' + h2h
+    prompt = recap_prompt + scores + "\n" + highlights_prompt + "\n" + qs + "\n" + h2h
 
     response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo-16k-0613",
@@ -328,11 +344,11 @@ def get_chatgpt_response(scores,qs,h2h):
             }
         ],
     )
-    return response["choices"][0]['message']['content']
+    return response["choices"][0]["message"]["content"]
 
 
 if __name__ == "__main__":
-   
+
     # eos_df = get_eos_stats(player_list_imessage)
     # dfi.export(eos_df, "imessage_eof.png")
 
@@ -359,4 +375,3 @@ if __name__ == "__main__":
         # gpt_resp = get_chatgpt_response(scores, questions, h2h)
 
         # post_text(gpt_resp, recipients_sms)
-
