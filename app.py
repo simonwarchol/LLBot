@@ -37,6 +37,7 @@ player_list_imessage = {
     "Rohan": {"id": "88991"},
     "Rebecca": {"id": "86268"},
     "Taylor": {"id": "96076"},
+    "Andrew": {"id": "90915"},
 }
 player_list_sms = {
     "Simon": {"id": "55444"},
@@ -67,6 +68,7 @@ def remove_prefix(text, prefix):
 def get_scores(player_list):
     todays_scores = []
     question_results = None
+    match_titles = []  # Track all match titles
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
@@ -74,6 +76,8 @@ def get_scores(player_list):
         page.fill('#sidebar input[name="username"]', config["LL_USERNAME"])
         page.fill('#sidebar input[name="password"]', config["LL_PW"])
         page.click('#sidebar input[type="submit"]')
+        # wait for .activerecentsection
+        page.wait_for_selector('.activerecentsection')
         for player, id_dict in player_list.items():
             player_id = id_dict["id"]
             page.goto(
@@ -105,7 +109,12 @@ def get_scores(player_list):
                 record = df.iloc[-1, :]["Result"]
                 opponent = df.iloc[-1, :]["Opponent"]
 
-                # result_string += ': ' + str(record) + ' ' + str(score) + ' ' + str(rundle_string)
+                # Get match title
+                page.goto(match_link)
+                match_title = page.inner_html("div.fd.fdl.fdhead > h1").strip()
+                match_titles.append(match_title)  # Add to our list of titles
+                print("match_title", match_title)
+
                 todays_scores.append(
                     {
                         "user": username,
@@ -113,59 +122,70 @@ def get_scores(player_list):
                         "record": record,
                         "opponent": opponent,
                         "rundle": rundle_string,
+                        "match_title": match_title,  # Store match title with score
                     }
                 )
-            page.goto(match_link)
-            if question_results is None:
-                question_results = []
-                day_table = page.inner_html("table.QTable")
-                day_table_df = pd.read_html(
-                    StringIO("<table>" + day_table + "</table>")
+
+                if question_results is None:
+                    question_results = []
+                    day_table = page.inner_html("table.QTable")
+                    day_table_df = pd.read_html(
+                        StringIO("<table>" + day_table + "</table>")
+                    )
+                    if day_table_df and len(day_table_df) > 0:
+                        day_table_df = day_table_df[0].dropna()
+                        for i in range(6):
+                            question = str(day_table_df.iloc[i, 1]).replace("\xa0", " ")
+                            question_results.append(
+                                {"question": question, "smart": [], "dumb": []}
+                            )
+
+                results_rows = page.query_selector_all("table.std.tbltop_inner tbody tr")
+                user_row = None
+                for row in results_rows:
+                    if username in row.inner_html():
+                        user_row = row
+                        break
+                classes = row.eval_on_selector_all(
+                    "td", "elements => elements.map(element => element.className)"
+                )[1:7]
+                correct_questions = [e == "c1" for e in classes]
+                for i, correct in enumerate(correct_questions):
+                    if correct:
+                        question_results[i]["smart"].append(username)
+                    else:
+                        question_results[i]["dumb"].append(username)
+
+        # Find most common match title
+        from collections import Counter
+        title_counter = Counter(match_titles)
+        most_common_title = title_counter.most_common(1)[0][0]
+        print(f"Most common match title: {most_common_title}")
+        
+        # Filter scores to only include those with the most common title
+        todays_scores = [score for score in todays_scores if score["match_title"] == most_common_title]
+
+        question_text = ""
+        for q in question_results:
+            if len(q["smart"]) == 1:
+                who = q["smart"][0]
+                question_text += (
+                    "Only " + who + " got: " + q["question"] + " -- WOW!\n\n"
                 )
-                if day_table_df and len(day_table_df) > 0:
-                    day_table_df = day_table_df[0].dropna()
-                    for i in range(6):
-                        question = str(day_table_df.iloc[i, 1]).replace("\xa0", " ")
-                        question_results.append(
-                            {"question": question, "smart": [], "dumb": []}
-                        )
+            elif len(q["smart"]) == len(player_list):
+                question_text += (
+                    "Everyone got: " + q["question"] + " -- IT'S TOO EASYYYYY!\n\n"
+                )
 
-            results_rows = page.query_selector_all("table.std.tbltop_inner tbody tr")
-            user_row = None
-            for row in results_rows:
-                if username in row.inner_html():
-                    user_row = row
-                    break
-            classes = row.eval_on_selector_all(
-                "td", "elements => elements.map(element => element.className)"
-            )[1:7]
-            correct_questions = [e == "c1" for e in classes]
-            for i, correct in enumerate(correct_questions):
-                if correct:
-                    question_results[i]["smart"].append(username)
-                else:
-                    question_results[i]["dumb"].append(username)
-            question_text = ""
-            for q in question_results:
-                if len(q["smart"]) == 1:
-                    who = q["smart"][0]
-                    question_text += (
-                        "Only " + who + " got: " + q["question"] + " -- WOW!\n\n"
-                    )
-                elif len(q["smart"]) == len(player_list):
-                    question_text += (
-                        "Everyone got: " + q["question"] + " -- IT'S TOO EASYYYYY!\n\n"
-                    )
-
-                if len(q["dumb"]) == 1:
-                    who = q["dumb"][0]
-                    question_text += (
-                        "Only " + who + " missed: " + q["question"] + " -- WOW!\n\n"
-                    )
-                elif len(q["dumb"]) == len(player_list):
-                    question_text += (
-                        "Everyone missed: " + q["question"] + " -- WE R DUM!\n\n"
-                    )
+            if len(q["dumb"]) == 1:
+                who = q["dumb"][0]
+                question_text += (
+                    "Only " + who + " missed: " + q["question"] + " -- WOW!\n\n"
+                )
+            elif len(q["dumb"]) == len(player_list):
+                question_text += (
+                    "Everyone missed: " + q["question"] + " -- WE R DUM!\n\n"
+                )
 
         users = {item["user"] for item in todays_scores}
         head_to_head_string = ""
@@ -190,11 +210,6 @@ def get_scores(player_list):
 
         todays_scores.sort(key=lambda x: x["score"][0],reverse=True)
 
-        # # "user": username,
-        #                     "score": score,
-        #                     "record": record,
-        #                     "opponent": opponent,
-        #                     "rundle": rundle_string
         scores_string = ""
         for item in todays_scores:
             scores_string += (
@@ -272,7 +287,7 @@ def get_eos_stats(player_list):
             rundle_string = page.inner_html(".std-left-key a")
             rundle_string = " ".join(rundle_string.split()[0:2])
             scores = page.inner_html("#Latest div table:first-of-type")
-            dfs = pd.read_html("<table>" + scores + "</table>")
+            dfs = pd.read_html(StringIO("<table>" + scores + "</table>"))
             if dfs and len(dfs) > 0:
                 df = dfs[0].dropna()
                 season_stats.append(
@@ -348,6 +363,7 @@ def get_chatgpt_response(scores, qs, h2h):
 
 
 if __name__ == "__main__":
+    pass
 
     # eos_df = get_eos_stats(player_list_imessage)
     # dfi.export(eos_df, "imessage_eof.png")
@@ -355,23 +371,23 @@ if __name__ == "__main__":
     # eos_df = get_eos_stats(player_list_sms)
     # dfi.export(eos_df, "sms_eof.png")
 
-    dayno = datetime.datetime.today().weekday()
-    if dayno >= 1 and dayno <= 5:
-        ############# IMESSAGE VERSION #############
-        scores, questions, h2h = get_scores(player_list_imessage)
-        post_text(scores, recipients_imessage)
-        post_text(questions, recipients_imessage)
-        post_text(h2h, recipients_imessage)
-        # gpt_resp = get_chatgpt_response(scores, questions, h2h)
-        # post_text(gpt_resp, recipients_imessage)
+    # dayno = datetime.datetime.today().weekday()
+    # if dayno >= 1 and dayno <= 5:
+    #     ############# IMESSAGE VERSION #############
+    #     scores, questions, h2h = get_scores(player_list_imessage)
+    #     post_text(scores, recipients_imessage)
+    #     post_text(questions, recipients_imessage)
+    #     post_text(h2h, recipients_imessage)
+    #     # # gpt_resp = get_chatgpt_response(scores, questions, h2h)
+    #     # # post_text(gpt_resp, recipients_imessage)
 
-        # ############# Text VERSION #############
-        scores, questions, h2h = get_scores(player_list_sms)
-        post_text(scores, recipients_sms)
-        post_text(questions, recipients_sms)
-        post_text(h2h, recipients_sms)
+    #     # ############# Text VERSION #############
+    #     scores, questions, h2h = get_scores(player_list_sms)
+    #     post_text(scores, recipients_sms)
+    #     post_text(questions, recipients_sms)
+    #     post_text(h2h, recipients_sms)
 
-        # Check if the current date is September 2, 2023
-        # gpt_resp = get_chatgpt_response(scores, questions, h2h)
+    #     # Check if the current date is September 2, 2023
+    #     # gpt_resp = get_chatgpt_response(scores, questions, h2h)
 
-        # post_text(gpt_resp, recipients_sms)
+    #     # post_text(gpt_resp, recipients_sms)
